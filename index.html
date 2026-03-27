@@ -43,8 +43,9 @@
             flex: 0 0 auto; text-align: center; padding: 20px 0 30px 0;
         }
 
+        /* 調整字體大小以容納三位數毫秒 */
         .main-time {
-            font-size: 4.5rem; font-weight: 300;
+            font-size: 4.2rem; font-weight: 300;
             font-variant-numeric: tabular-nums; 
             line-height: 1; letter-spacing: -1px;
         }
@@ -104,7 +105,7 @@
         .record-item {
             display: flex; justify-content: space-between; padding: 15px 20px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            font-variant-numeric: tabular-nums; font-size: 1rem;
+            font-variant-numeric: tabular-nums; font-size: 0.95rem;
             animation: fadeIn 0.3s ease-out;
         }
         @keyframes fadeIn {
@@ -114,14 +115,14 @@
 
         .record-item.fastest { color: #4ade80; } 
         .record-item.slowest { color: #f87171; } 
-        .col-index { width: 20%; text-align: left; }
-        .col-lap { width: 40%; text-align: center; }
-        .col-total { width: 40%; text-align: right; }
+        .col-index { width: 15%; text-align: left; }
+        .col-lap { width: 42%; text-align: center; }
+        .col-total { width: 43%; text-align: right; }
 
         /* 匯出按鈕區塊 */
-        .export-section { flex: 0 0 auto; }
+        .export-section { flex: 0 0 auto; display: flex; gap: 10px; }
         .btn-export {
-            width: 100%; background-color: var(--btn-export); color: white;
+            flex: 1; background-color: var(--btn-export); color: white;
             border: none; padding: 16px; border-radius: 12px;
             font-size: 1.1rem; font-weight: bold; cursor: pointer;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2); transition: 0.2s;
@@ -145,7 +146,6 @@
         }
         .toast.show { transform: translateX(-50%) translateY(0); }
         
-        /* 隱藏的文字區塊用於複製回退方案 */
         #hiddenTextarea { position: absolute; left: -9999px; }
 
     </style>
@@ -154,7 +154,7 @@
 
 <div class="app-container">
     <div class="display-section">
-        <div class="main-time" id="mainTimeDisplay">00:00.00</div>
+        <div class="main-time" id="mainTimeDisplay">00:00.000</div>
         <div class="lap-time-display" id="lapTimeDisplay"></div>
     </div>
 
@@ -175,7 +175,11 @@
     <div class="export-section">
         <button class="btn-export" id="btnExport" disabled>
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-            儲存 / 匯出紀錄
+            <span id="exportText">儲存 / 分享</span>
+        </button>
+        <button class="btn-export" id="btnCopy" disabled style="display: none; background-color: var(--btn-lap);">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            複製紀錄
         </button>
     </div>
 </div>
@@ -184,7 +188,6 @@
 <textarea id="hiddenTextarea" readonly></textarea>
 
 <script>
-    // 註冊 Service Worker 讓 APP 可以離線執行
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
@@ -193,7 +196,6 @@
         });
     }
 
-    // 狀態變數
     let isRunning = false;
     let startTime = 0;
     let previousTotalTime = 0;
@@ -202,17 +204,24 @@
     let timerInterval = null;
     let laps = []; 
     
-    // DOM
     const mainTimeDisplay = document.getElementById('mainTimeDisplay');
     const lapTimeDisplay = document.getElementById('lapTimeDisplay');
     const btnLapReset = document.getElementById('btnLapReset');
     const btnStartStop = document.getElementById('btnStartStop');
     const recordsList = document.getElementById('recordsList');
     const btnExport = document.getElementById('btnExport');
+    const btnCopy = document.getElementById('btnCopy');
+    const exportText = document.getElementById('exportText');
     const toastMessage = document.getElementById('toastMessage');
     const hiddenTextarea = document.getElementById('hiddenTextarea');
 
-    // 載入本地儲存資料 (LocalStorage) - 這裡加入了優化1
+    // 判斷是否為電腦版 (沒有觸控螢幕功能通常就是電腦)
+    const isDesktop = !window.matchMedia("(any-pointer: coarse)").matches;
+    if (isDesktop) {
+        exportText.textContent = "下載 TXT";
+        btnCopy.style.display = "flex"; // 顯示複製按鈕
+    }
+
     function loadLocalData() {
         const savedData = localStorage.getItem('stopwatch_data');
         if (savedData) {
@@ -224,7 +233,6 @@
                 
                 if (previousTotalTime > 0 && !isRunning) {
                     mainTimeDisplay.textContent = formatTime(previousTotalTime);
-                    // 優化1：確保重開 APP 時，單圈時間也會顯示出來
                     if (laps.length > 0) {
                         lapTimeDisplay.textContent = formatTime(previousLapTime);
                     }
@@ -237,7 +245,6 @@
         updateButtons();
     }
 
-    // 儲存至本地 (避免網頁重整資料消失)
     function saveLocalData() {
         const dataToSave = {
             laps: laps,
@@ -247,22 +254,21 @@
         localStorage.setItem('stopwatch_data', JSON.stringify(dataToSave));
     }
 
-    // 格式化時間
+    // 格式化時間 (升級為 3 位數毫秒)
     function formatTime(ms) {
         const totalSeconds = Math.floor(ms / 1000);
         const minutes = Math.floor(totalSeconds / 60);
         const hours = Math.floor(minutes / 60);
         const seconds = totalSeconds % 60;
-        const hundredths = Math.floor((ms % 1000) / 10);
+        const milliseconds = ms % 1000; // 取得 0~999 毫秒
 
         const strMin = (minutes % 60).toString().padStart(2, '0');
         const strSec = seconds.toString().padStart(2, '0');
-        const strHun = hundredths.toString().padStart(2, '0');
+        const strMs = milliseconds.toString().padStart(3, '0'); // 補齊 3 位數
 
-        return hours > 0 ? `${hours.toString().padStart(2, '0')}:${strMin}:${strSec}.${strHun}` : `${strMin}:${strSec}.${strHun}`;
+        return hours > 0 ? `${hours.toString().padStart(2, '0')}:${strMin}:${strSec}.${strMs}` : `${strMin}:${strSec}.${strMs}`;
     }
 
-    // 畫面更新
     function updateDisplay() {
         const now = Date.now();
         const currentTotalTime = previousTotalTime + (now - startTime);
@@ -283,10 +289,12 @@
             btnLapReset.textContent = "復位";
         }
         btnLapReset.style.opacity = (!isRunning && previousTotalTime === 0) ? "0.5" : "1";
+        
+        // 控制兩個匯出按鈕的啟用狀態
         btnExport.disabled = laps.length === 0;
+        btnCopy.disabled = laps.length === 0;
     }
 
-    // 開始/停止
     btnStartStop.addEventListener('click', () => {
         if (isRunning) {
             isRunning = false;
@@ -306,7 +314,6 @@
         updateButtons();
     });
 
-    // 計圈/復位
     btnLapReset.addEventListener('click', () => {
         if (isRunning) {
             const now = Date.now();
@@ -325,13 +332,12 @@
             saveLocalData();
         } else {
             if (previousTotalTime === 0) return;
-            // 執行復位
             isRunning = false;
             previousTotalTime = 0; previousLapTime = 0;
             startTime = 0; lapStartTime = 0; laps = [];
             
             clearInterval(timerInterval);
-            mainTimeDisplay.textContent = "00:00.00";
+            mainTimeDisplay.textContent = "00:00.000"; // 復位時顯示 3 位數
             lapTimeDisplay.textContent = "";
             recordsList.innerHTML = "";
             localStorage.removeItem('stopwatch_data');
@@ -375,10 +381,8 @@
         toastTimeout = setTimeout(() => toastMessage.classList.remove('show'), 3000);
     }
 
-    // 匯出功能 (手機友善版)
-    btnExport.addEventListener('click', async () => {
-        if (laps.length === 0) return;
-
+    // 產生要匯出/複製的純文字紀錄
+    function getRecordText() {
         let txt = "【專業運動碼表紀錄】\n";
         txt += `日期：${new Date().toLocaleString('zh-TW')}\n`;
         txt += "==================================\n";
@@ -388,41 +392,67 @@
             txt += `${String(lap.lapNumber).padStart(2,'0')}\t${formatTime(lap.lapTime)}\t${formatTime(lap.totalTime)}\n`;
         });
         txt += "==================================\n";
+        return txt;
+    }
 
-        // 方法 1: 使用手機原生分享 (可傳LINE、存備忘錄)
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: '碼表紀錄',
-                    text: txt
-                });
-                return; // 分享成功即結束
-            } catch (err) {
-                console.log("分享取消或失敗，改用備用方案");
-            }
-        }
-
-        // 方法 2: 自動複製到剪貼簿 (適用於無法分享的環境)
+    // 複製到剪貼簿的共用函式
+    async function copyToClipboard(txt) {
         try {
             await navigator.clipboard.writeText(txt);
-            showToast("✅ 紀錄已複製！請貼上至您的備忘錄或聊天室");
+            showToast("✅ 紀錄已複製！");
         } catch (err) {
-            // 方法 3: 傳統隱藏文字框複製 (最舊瀏覽器備案)
             hiddenTextarea.value = txt;
             hiddenTextarea.select();
             document.execCommand('copy');
             showToast("✅ 紀錄已複製！");
         }
+    }
+
+    // 主匯出按鈕 (手機：原生分享，電腦：下載 TXT 檔)
+    btnExport.addEventListener('click', async () => {
+        if (laps.length === 0) return;
+        const txt = getRecordText();
+
+        if (isDesktop) {
+            // 電腦版行為：下載成 TXT 檔
+            const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `碼表紀錄_${new Date().getTime()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast("✅ 紀錄已下載為 TXT 檔");
+        } else {
+            // 手機版行為：叫出系統分享選單 (傳 LINE、存備忘錄等)
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: '碼表紀錄',
+                        text: txt
+                    });
+                    return; 
+                } catch (err) {
+                    console.log("分享取消或失敗，改用備用方案");
+                }
+            }
+            // 如果手機不支援分享，退回複製功能
+            copyToClipboard(txt);
+        }
     });
 
-    // 優化2：當 APP 被切換到背景、或準備關閉時，自動觸發存檔
+    // 電腦版專屬的「僅複製紀錄」按鈕
+    btnCopy.addEventListener('click', () => {
+        if (laps.length === 0) return;
+        copyToClipboard(getRecordText());
+    });
+
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
             saveLocalData();
         }
     });
 
-    // 初始化執行
     loadLocalData();
 
 </script>
